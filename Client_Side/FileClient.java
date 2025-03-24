@@ -3,151 +3,163 @@ import java.net.*;
 import java.util.Scanner;
 
 public class FileClient {
-    private static final String SERVER_IP = "192.168.104.241"; // Change this to your server IP
+    private static final String SERVER_ADDRESS = "127.0.0.1";
     private static final int TCP_PORT = 5000;
     private static final int UDP_PORT = 5001;
 
     public static void main(String[] args) {
         Scanner scanner = new Scanner(System.in);
-        System.out.print("Do you want to (SEND/RECEIVE) a file? ");
-        String action = scanner.nextLine().toUpperCase();
 
-        System.out.print("Enter file name: ");
+        System.out.println("Choose protocol: 1. TCP  2. UDP");
+        int choice = scanner.nextInt();
+        scanner.nextLine(); // Consume newline
+
+        System.out.println("Choose operation: 1. Download File  2. Upload File");
+        int operation = scanner.nextInt();
+        scanner.nextLine(); // Consume newline
+
+        System.out.print("Enter the filename: ");
         String fileName = scanner.nextLine();
 
-        System.out.print("Choose Protocol (TCP/UDP): ");
-        String protocol = scanner.nextLine().toUpperCase();
-
-        if (protocol.equals("TCP")) {
-            if (action.equals("SEND")) {
+        if (choice == 1) {
+            if (operation == 1) {
+                requestFileTCP(fileName);
+            } else if (operation == 2) {
                 sendFileTCP(fileName);
-            } else if (action.equals("RECEIVE")) {
-                receiveFileTCP(fileName);
-            } else {
-                System.out.println("Invalid action!");
             }
-        } else if (protocol.equals("UDP")) {
-            if (action.equals("SEND")) {
+        } else if (choice == 2) {
+            if (operation == 1) {
+                requestFileUDP(fileName);
+            } else if (operation == 2) {
                 sendFileUDP(fileName);
-            } else if (action.equals("RECEIVE")) {
-                receiveFileUDP(fileName);
-            } else {
-                System.out.println("Invalid action!");
             }
         } else {
-            System.out.println("Invalid protocol! Use TCP or UDP.");
+            System.out.println("Invalid choice. Exiting.");
         }
 
         scanner.close();
     }
 
-    // 📌 Send File via TCP
-    private static void sendFileTCP(String fileName) {
-        try (Socket socket = new Socket(SERVER_IP, TCP_PORT);
-             DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
-             FileInputStream fis = new FileInputStream(fileName)) {
+    private static void requestFileTCP(String fileName) {
+        try (Socket socket = new Socket(SERVER_ADDRESS, TCP_PORT);
+             PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+             BufferedInputStream in = new BufferedInputStream(socket.getInputStream())) {
 
-            dos.writeUTF("SEND");
-            dos.writeUTF(fileName); // Send file name
+            out.println("DOWNLOAD " + fileName);
 
-            byte[] buffer = new byte[4096];
-            int bytesRead;
-
-            System.out.println("Sending file via TCP...");
-
-            while ((bytesRead = fis.read(buffer)) != -1) {
-                dos.write(buffer, 0, bytesRead);
-            }
-
-            System.out.println("File sent successfully via TCP!");
-        } catch (IOException e) {
-            System.out.println("Error: File not found or connection issue.");
-        }
-    }
-
-    // 📌 Receive File via TCP
-    private static void receiveFileTCP(String fileName) {
-        try (Socket socket = new Socket(SERVER_IP, TCP_PORT);
-             DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
-             DataInputStream dis = new DataInputStream(socket.getInputStream());
-             FileOutputStream fos = new FileOutputStream("received_" + fileName)) {
-
-            dos.writeUTF("RECEIVE");
-            dos.writeUTF(fileName);
+            File receivedFile = new File("Received_" + fileName);
+            FileOutputStream fos = new FileOutputStream(receivedFile);
 
             byte[] buffer = new byte[4096];
             int bytesRead;
 
-            System.out.println("Receiving file via TCP...");
-
-            while ((bytesRead = dis.read(buffer)) != -1) {
+            while ((bytesRead = in.read(buffer)) != -1) {
                 fos.write(buffer, 0, bytesRead);
             }
 
+            fos.close();
             System.out.println("File received successfully via TCP!");
+
         } catch (IOException e) {
-            System.out.println("Error: File not found on server.");
+            System.out.println("Error receiving file via TCP: " + e.getMessage());
         }
     }
 
-    // 📌 Send File via UDP
-    private static void sendFileUDP(String fileName) {
-        try (DatagramSocket udpSocket = new DatagramSocket();
-             FileInputStream fis = new FileInputStream(fileName)) {
+    private static void sendFileTCP(String fileName) {
+        try (Socket socket = new Socket(SERVER_ADDRESS, TCP_PORT);
+             PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+             BufferedOutputStream bos = new BufferedOutputStream(socket.getOutputStream())) {
 
-            InetAddress serverAddress = InetAddress.getByName(SERVER_IP);
+            File file = new File(fileName);
+            if (!file.exists()) {
+                System.out.println("File not found.");
+                return;
+            }
 
-            // Send File Name
-            byte[] fileNameBytes = fileName.getBytes();
-            DatagramPacket fileNamePacket = new DatagramPacket(fileNameBytes, fileNameBytes.length, serverAddress, UDP_PORT);
-            udpSocket.send(fileNamePacket);
-
+            out.println("UPLOAD " + fileName);
+            FileInputStream fis = new FileInputStream(file);
             byte[] buffer = new byte[4096];
             int bytesRead;
 
-            System.out.println("Sending file via UDP...");
-
             while ((bytesRead = fis.read(buffer)) != -1) {
-                DatagramPacket packet = new DatagramPacket(buffer, bytesRead, serverAddress, UDP_PORT);
-                udpSocket.send(packet);
+                bos.write(buffer, 0, bytesRead);
             }
 
-            // Send "END" Signal
-            byte[] endSignal = "END".getBytes();
-            DatagramPacket endPacket = new DatagramPacket(endSignal, endSignal.length, serverAddress, UDP_PORT);
-            udpSocket.send(endPacket);
+            fis.close();
+            bos.flush();
+            System.out.println("File sent successfully via TCP!");
 
-            System.out.println("File sent successfully via UDP!");
         } catch (IOException e) {
-            System.out.println("Error: File not found or connection issue.");
+            System.out.println("Error sending file via TCP: " + e.getMessage());
         }
     }
 
-    // 📌 Receive File via UDP (✅ NEWLY ADDED FUNCTION)
-    private static void receiveFileUDP(String fileName) {
-        try (DatagramSocket udpSocket = new DatagramSocket(UDP_PORT);
-             FileOutputStream fos = new FileOutputStream("received_" + fileName)) {
+    private static void requestFileUDP(String fileName) {
+        try (DatagramSocket udpSocket = new DatagramSocket()) {
+            InetAddress serverAddress = InetAddress.getByName(SERVER_ADDRESS);
+
+            byte[] fileNameBytes = ("DOWNLOAD " + fileName).getBytes();
+            DatagramPacket requestPacket = new DatagramPacket(fileNameBytes, fileNameBytes.length, serverAddress, UDP_PORT);
+            udpSocket.send(requestPacket);
+
+            File receivedFile = new File("Received_" + fileName);
+            FileOutputStream fos = new FileOutputStream(receivedFile);
 
             byte[] buffer = new byte[4096];
-            DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
-
-            System.out.println("Receiving file via UDP...");
+            DatagramPacket receivePacket = new DatagramPacket(buffer, buffer.length);
 
             while (true) {
-                udpSocket.receive(packet);
-                String receivedData = new String(packet.getData(), 0, packet.getLength());
+                udpSocket.receive(receivePacket);
+                String receivedData = new String(receivePacket.getData(), 0, receivePacket.getLength());
 
-                if (receivedData.equals("END")) break; // Stop when "END" signal is received
+                if (receivedData.equals("END")) {
+                    break;
+                }
 
-                fos.write(packet.getData(), 0, packet.getLength());
+                fos.write(receivePacket.getData(), 0, receivePacket.getLength());
             }
 
-            fos.flush();
+            fos.close();
             System.out.println("File received successfully via UDP!");
+
         } catch (IOException e) {
-            System.out.println("Error: UDP receive failed.");
+            System.out.println("Error receiving file via UDP: " + e.getMessage());
+        }
+    }
+
+    private static void sendFileUDP(String fileName) {
+        try (DatagramSocket udpSocket = new DatagramSocket()) {
+            InetAddress serverAddress = InetAddress.getByName(SERVER_ADDRESS);
+
+            File file = new File(fileName);
+            if (!file.exists()) {
+                System.out.println("File not found.");
+                return;
+            }
+
+            byte[] fileNameBytes = ("UPLOAD " + fileName).getBytes();
+            DatagramPacket requestPacket = new DatagramPacket(fileNameBytes, fileNameBytes.length, serverAddress, UDP_PORT);
+            udpSocket.send(requestPacket);
+
+            FileInputStream fis = new FileInputStream(file);
+            byte[] buffer = new byte[4096];
+            DatagramPacket sendPacket;
+
+            int bytesRead;
+            while ((bytesRead = fis.read(buffer)) != -1) {
+                sendPacket = new DatagramPacket(buffer, bytesRead, serverAddress, UDP_PORT);
+                udpSocket.send(sendPacket);
+            }
+
+            byte[] endSignal = "END".getBytes();
+            sendPacket = new DatagramPacket(endSignal, endSignal.length, serverAddress, UDP_PORT);
+            udpSocket.send(sendPacket);
+
+            fis.close();
+            System.out.println("File sent successfully via UDP!");
+
+        } catch (IOException e) {
+            System.out.println("Error sending file via UDP: " + e.getMessage());
         }
     }
 }
-
-
